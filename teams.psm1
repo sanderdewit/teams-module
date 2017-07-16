@@ -127,7 +127,73 @@ function get-team {
   $objects
   }
 }
+function add-Team {
+  <#
+  .SYNOPSIS
+  Invoking a rest request to the Microsoft graph api to add a team
+  .DESCRIPTION
+  Describe the function in more detail
+  .EXAMPLE
+  Give an example of how to use it
+  #>
+  [CmdletBinding()]
+  #[CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='Low')]
+  param
+  (
+        [Parameter(Mandatory=$true)]$description,
+        [Parameter(Mandatory=$true)]$displayname,
+        [Parameter(Mandatory=$true)][boolean]$mailEnabled,
+        [Parameter(Mandatory=$true)][boolean]$securityEnabled,
+        [Parameter(Mandatory=$true)]$mailNickname
+  )
+  begin {
+  write-verbose "checking for teams token"
+    if (!($TeamsAuthToken))
+    {throw 'please run connect-TeamsService first'}
+  }
+  process {
+    write-verbose "start to invoke rest request"
+    $uri = 'https://graph.microsoft.com/beta/groups'
+    $postparams = @{
+    description = $description
+    displayName = $displayname
+    mailEnabled = $mailEnabled
+    mailNickname = $mailNickname
+    securityEnabled = $securityEnabled
+    groupTypes = @("Unified")
+    }
+    Invoke-RestMethod -Uri $uri -Headers $TeamsAuthToken -Method post -Body $($postparams|convertto-json)
+    write-debug "added team $displayName"
+  }
+}
 
+function remove-Team {
+  <#
+  .SYNOPSIS
+  Invoking a rest request to the Microsoft graph api to add a team
+  .DESCRIPTION
+  Describe the function in more detail
+  .EXAMPLE
+  Give an example of how to use it
+  #>
+  [CmdletBinding()]
+  #[CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='Low')]
+  param
+  (
+        [Parameter(Mandatory=$true)]$teamid
+  )
+  begin {
+  write-verbose "checking for teams token"
+    if (!($TeamsAuthToken))
+    {throw 'please run connect-TeamsService first'}
+  }
+  process {
+    write-verbose "start to invoke rest request"
+    $uri = "https://graph.microsoft.com/beta/groups/$teamid"
+    Invoke-RestMethod -Uri $uri -Headers $TeamsAuthToken -Method delete
+    write-debug "removing team $teamid"
+  }
+}
 function get-teammembers {
   <#
   .SYNOPSIS
@@ -297,4 +363,4 @@ function remove-TeamOwner {
         write-debug "removing teamowner $member for $teamid"
   }
 }
-Export-ModuleMember connect-TeamsService, get-team, get-teammembers, add-TeamMember, remove-teammember
+Export-ModuleMember connect-TeamsService, get-team, get-teammembers, add-TeamMember, remove-teammember, add-TeamOwner, remove-TeamOwner, add-Team, remove-team
