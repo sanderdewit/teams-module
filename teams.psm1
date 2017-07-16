@@ -128,6 +128,173 @@ function get-team {
   }
 }
 
+function get-teammembers {
+  <#
+  .SYNOPSIS
+  Invoking a rest request to the Microsoft graph api to get current teammembers
+  .DESCRIPTION
+  Describe the function in more detail
+  .EXAMPLE
+  Give an example of how to use it
+  #>
+  [CmdletBinding()]
+  #[CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='Low')]
+  param
+  (
+        [Parameter(Mandatory=$true)]$teamid
+  )
+  begin {
+  write-verbose "checking for teams token"
+    if (!($TeamsAuthToken))
+    {throw 'please run connect-TeamsService first'}
+  }
+  process {
+    write-verbose "start to invoke rest request"
+    $nextlink = $true
+    $uri = "https://graph.microsoft.com/beta/groups/$teamid/members"
+    $teams = Invoke-RestMethod -Uri $uri -Headers $TeamsAuthToken -Method get
+    while ($nextlink -eq $true){
+    if ($($teams.'@odata.nextLink') -ne $null){
+      $results = $teams.value
+      $teams = Invoke-RestMethod -Uri $($teams.'@odata.nextLink')-Headers $TeamsAuthToken -Method get
+    }
+    if ($($teams.'@odata.nextLink') -eq $null){
+      $results = $teams.value
+      $teams = $null
+    $nextlink = $false}
+    write-debug "getting groupmember for $teamid"
+    $objects += $results
+  }
+  $objects
+  }
+}
 
+function add-TeamMember {
+  <#
+  .SYNOPSIS
+  Invoking a rest request to the Microsoft graph api to add teammembers
+  .DESCRIPTION
+  Describe the function in more detail
+  .EXAMPLE
+  Give an example of how to use it
+  #>
+  [CmdletBinding()]
+  #[CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='Low')]
+  param
+  (
+        [Parameter(Mandatory=$true)]$teamid,
+        [Parameter(Mandatory=$true)]$member
+  )
+  begin {
+  write-verbose "checking for teams token"
+    if (!($TeamsAuthToken))
+    {throw 'please run connect-TeamsService first'}
+  }
+  process {
+    write-verbose "start to invoke rest request"
+    $uri = "https://graph.microsoft.com/beta/groups/$teamid/members/" + '$ref'
+    $postparams = @{
+    '@odata.id' = "https://graph.microsoft.com/beta/users/$member"
+    }
+    Invoke-RestMethod -Uri $uri -Headers $TeamsAuthToken -Method post -Body $($postparams|convertto-json)
+    write-debug "adding teammember $member for $teamid"
+  }
+}
 
-Export-ModuleMember connect-TeamsService, get-team
+function add-TeamOwner {
+  <#
+  .SYNOPSIS
+  Invoking a rest request to the Microsoft graph api to add TeamOwner
+  .DESCRIPTION
+  Describe the function in more detail
+  .EXAMPLE
+  Give an example of how to use it
+  #>
+  [CmdletBinding()]
+  #[CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='Low')]
+  param
+  (
+        [Parameter(Mandatory=$true)]$teamid,
+        [Parameter(Mandatory=$true)]$member
+  )
+  begin {
+  write-verbose "checking for teams token"
+    if (!($TeamsAuthToken))
+    {throw 'please run connect-TeamsService first'}
+  }
+  process {
+    write-verbose "start to invoke rest request"
+    $uri = "https://graph.microsoft.com/beta/groups/$teamid/owners/" + '$ref'
+    $postparams = @{
+    '@odata.id' = "https://graph.microsoft.com/beta/users/$member"
+    }
+    Invoke-RestMethod -Uri $uri -Headers $TeamsAuthToken -Method post -Body $($postparams|convertto-json)
+    write-debug "adding owner $member for $teamid"
+  }
+}
+function remove-TeamMember {
+  <#
+  .SYNOPSIS
+  Invoking a rest request to the Microsoft graph api to remove teammembers
+  .DESCRIPTION
+  Describe the function in more detail
+  .EXAMPLE
+  Give an example of how to use it
+  #>
+  [CmdletBinding()]
+  #[CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='Low')]
+  param
+  (
+        [Parameter(Mandatory=$true)]$teamid,
+        [Parameter(Mandatory=$true)]$member
+  )
+  begin {
+  write-verbose "checking for teams token"
+    if (!($TeamsAuthToken))
+    {throw 'please run connect-TeamsService first'}
+  }
+  process {
+    write-verbose "start to invoke rest request"
+    if ($member -like '*@*'){
+      Write-Debug "found UPN instead of ID, converting..."
+      $member = (Invoke-RestMethod -Uri "https://graph.microsoft.com/beta/users/$member/id" -Headers $TeamsAuthToken -Method get).value
+    }
+        $uri = "https://graph.microsoft.com/beta/groups/$teamid/members/$member" + '/$ref'
+        Invoke-RestMethod -Uri $uri -Headers $TeamsAuthToken -Method Delete -Body $postparams
+        write-debug "removing teammember $member for $teamid"
+  }
+}
+
+function remove-TeamOwner {
+  <#
+  .SYNOPSIS
+  Invoking a rest request to the Microsoft graph api to remove teamOwners
+  .DESCRIPTION
+  Describe the function in more detail
+  .EXAMPLE
+  Give an example of how to use it
+  #>
+  [CmdletBinding()]
+  #[CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='Low')]
+  param
+  (
+        [Parameter(Mandatory=$true)]$teamid,
+        [Parameter(Mandatory=$true)]$member
+  )
+  begin {
+  write-verbose "checking for teams token"
+    if (!($TeamsAuthToken))
+    {throw 'please run connect-TeamsService first'}
+  }
+  process {
+    write-verbose "start to invoke rest request"
+    if ($member -like '*@*'){
+      Write-Debug "found UPN instead of ID, converting..."
+      $member = (Invoke-RestMethod -Uri "https://graph.microsoft.com/beta/users/$member/id" -Headers $TeamsAuthToken -Method get).value
+    }
+        $uri = "https://graph.microsoft.com/beta/groups/$teamid/owners/$member" + '/$ref'
+        Invoke-RestMethod -Uri $uri -Headers $TeamsAuthToken -Method Delete -Body $postparams
+        write-debug "removing teamowner $member for $teamid"
+  }
+}
+Export-ModuleMember connect-TeamsService, get-team, get-teammembers, add-TeamMember, remove-teammember
