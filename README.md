@@ -7,7 +7,9 @@ PowerShell 4.0 or higher is required.
 
 connect-teamsservice -user admin@contoso.com -tenant contoso.onmicrosoft.com
 
-current functions;
-add-team, remove-team, get-team, get-teammembers, add-teammember, remove-teammember, add-teamowner, remove-teamowner
+using teams_v2.psm1 uses the undocumented Teams API.
 
-add-team currently only adds an o365 unified group. Unfortunately the API does not support this yet.
+current functions;
+add-team.
+
+the team.psm1 uses the groups graph api but is unable to provision a real team, while team_v2.psm1 is able to provision a correct team.
