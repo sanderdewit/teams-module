@@ -19,7 +19,8 @@ function connect-TeamsService {
   param
   (
     [Parameter(Mandatory=$true)]$User,
-    [Parameter(Mandatory=$true)]$tenant
+    [Parameter(Mandatory=$true)]$tenant,
+    [Parameter(Mandatory=$false)][switch]$silent
   )
   Write-Verbose "Checking for AzureAD module..."
   $AadModule = Get-Module -Name "AzureAD" -ListAvailable
@@ -59,7 +60,9 @@ if ($AadModule -eq $null) {
     $platformParameters = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.PlatformParameters" -ArgumentList "Always"
     $userId = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.UserIdentifier" -ArgumentList ($User, "OptionalDisplayableId")
     #New-Object 'Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationParameters'
-    $authResult = $authContext.AcquireTokenAsync($resourceAppIdURI,$clientId,$redirectUri,$platformParameters,$userId).Result
+    if ($silent){$authResult = $authContext.AcquireTokenSilentAsync($resourceAppIdURI,$clientId,$userid,$platformParameters).Result}
+    else {
+    $authResult = $authContext.AcquireTokenAsync($resourceAppIdURI,$clientId,$redirectUri,$platformParameters,$userId).Result}
     # If the accesstoken is valid then create the authentication header
     if($authResult.AccessToken){
       # Creating header for Authorization token
@@ -76,8 +79,14 @@ if ($AadModule -eq $null) {
       }else {
         $TeamsauthHeader += @{
         'X-Skypetoken' = $($AuthSkypeResult.tokens.skypetoken)
-      }}
+      }
+        $SkypeHeader = @{
+        Authentication = "skypetoken=$($TeamsauthHeader.'X-Skypetoken')"
+        'content-type' = 'application/json'
+        }
+      }
       $global:TeamsAuthToken = $TeamsauthHeader
+      $global:SkypeToken = $SkypeHeader
     }
     else {
       Write-Warning "Authorization Access Token is null, please re-run authentication..."
@@ -163,39 +172,56 @@ if ($AadModule -eq $null) {
     #check if ID is given as parameter.
     Write-Verbose 'validating parameter'
     if ($($team.length) -eq '36' -and $Team -match “[0123456789abcdef-]{$($Team.length)}”){
-    $TeamResult = $Team
+    Write-Verbose "ip detected, skipping lookup"
+    $TeamId = $Team
     } #check if ID is given as parameter.
     else {  #finding team based on wildcard search
-    $TeamResult = (Invoke-RestMethod -Uri 'https://api.teams.skype.com/emea/beta/teams/usergroups?teamType=null' -Method get -Headers $TeamsAuthToken|Where-Object {$_.displayName -like "*$Team*"}).groupId #filtering does not yet work using $filter, so retrieving all teams and filters on the output
-    if ($TeamResult -eq $null){write-error 'team not found'
+    $Teams = Invoke-RestMethod -Uri 'https://api.teams.skype.com/emea/beta/teams/usergroups?teamType=null' -Method get -Headers $TeamsAuthToken
+    Write-Verbose "$teams"
+    $TeamId = $Teams|Where-Object {$_.displayName -like "*$Team*"} #filtering does not yet work using $filter, so retrieving all teams and filters on the output
+    Write-Verbose "ID: $($TeamId.groupId)"
+    if ($($TeamId.groupId) -eq $null){write-error 'team not found'
     throw ("team $Team couldn't be found")}
-    }    
+    }
+    Write-Verbose "finding team member"
     #finding team member
     $Members = foreach ($Member in $Members){
     if ($($Member.length) -eq '36' -and $Member -match “[0123456789abcdef-]{$($Member.length)}”){
     $MemberResult = $Member}
     else {
-    $MemberResult = (Invoke-RestMethod -Uri ' https://api.teams.skype.com/emea/beta/users/search?includeDLs=true&includeBots=false&enableGuest=false&skypeTeamsInfo=true' -Method Post -Headers $TeamsAuthToken -Body $Member).value.findPeopleTransactionId #assuming correct UPN to be send.
+    $MemberResult = (Invoke-RestMethod -Uri ' https://api.teams.skype.com/emea/beta/users/search?includeDLs=true&includeBots=false&enableGuest=false&skypeTeamsInfo=true' -Method Post -Headers $TeamsAuthToken -Body $Member).value.objectId #assuming correct UPN to be send.
     if ($MemberResult -eq $null){write-error 'member not found'
     throw ("UserPrincipalName $Member couldn't be found")}
     }
-    #figure out how to retrieve sessionid
-    #$uri = "https://api.teams.skype.com/emea/beta/teams/19:$teammbx@thread.skype/bulkUpdateRoledMembers?allowBotsInChannel=true"
-    #$uri = "https://api.teams.skype.com/emea/beta/teams/19:e935b68c149f463b9bc7bce51dac8206@thread.skype/bulkUpdateRoledMembers?allowBotsInChannel=true"
     [pscustomobject]@{ #create the members object
-    mri = "8:orgid:$member"
+    mri = "8:orgid:$MemberResult"
     role = '0' #role 0 is used for members, 1 is used for owners
     }}
-    $uri = 'https://api.teams.skype.com/emea/beta/teams/19:5e3ce6c0-2b1f-4285-8d4b-75ee78787346@thread.skype/bulkUpdateRoledMembers?allowBotsInChannel=true'
+    Write-Verbose "members: $Members"
+    $teaminfo = (Invoke-RestMethod -Uri 'https://emea-client-ss.msg.skype.com/v1/users/ME/conversations?view=msnp24Equivalent&pageSize=300&startTime=1&targetType=Passport|Skype|Lync|Thread|NotificationStream' -Method Get -Headers $skypetoken).conversations|Where-Object {$_.threadProperties.isdeleted -ne 'true' -and $_.threadProperties.threadType -eq 'space'}  
+    $teamresults = foreach ($team in $teams){
+    try {
+    $teamres = ([uri]($teaminfo|Where-Object {$_.threadProperties.spaceThreadTopic -eq $team.displayName}).targetLink).Segments[3]
+    [pscustomobject]@{
+    groupId = $team.groupId
+    displayName = $team.displayName
+    targetLink = $teamres}
+    }catch {}
+    }
+    $teamurl = ($teamresults|Where-Object {$_.groupid -eq $($TeamId.groupId)}).targetlink
+    Write-Verbose "$teamurl"
+    $uri = "https://api.teams.skype.com/emea/beta/teams/$($teamurl)/bulkUpdateRoledMembers?allowBotsInChannel=true"
+
     $postparams = @{
     'users' = @($Members)
-    'groupId' = $TeamResult
+    'groupId' = $($TeamId.groupId)
     }
     
     $result = Invoke-RestMethod -Uri $uri -Headers $TeamsAuthToken -Method Put -Body $($postparams|convertto-json)
-    write-debug "added team $displayName"
-    Write-Debug "$($result.value)"
+    Write-Verbose "added team $displayName"
+    Write-Verbose "$($result.value)"
+    $result.value
   }
 }
 
-Export-ModuleMember connect-TeamsService, new-team
+Export-ModuleMember connect-TeamsService, new-Team, add-TeamMember
