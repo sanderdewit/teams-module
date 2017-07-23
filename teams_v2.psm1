@@ -9,8 +9,7 @@ function connect-TeamsService {
       .EXAMPLE
       connect-TeamsService -user user@contoso.com -tenant contoso.onmicrosoft.com
  
-      .NOTES
- 
+      .NOTES      
       NAME: connect-TeamsService
  
   #>
@@ -153,7 +152,7 @@ if ($AadModule -eq $null) {
   .DESCRIPTION
   This invoke the restapi to add a teammember to a team.
   .EXAMPLE
-  add-teammember -team 'teamtest' -member 'user@contoso.com'
+  add-teammember -team 'teamtest' -members 'user@contoso.com'
   #>
   [CmdletBinding()]
   #[CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='Low')]
@@ -171,18 +170,20 @@ if ($AadModule -eq $null) {
     write-verbose 'start to invoke rest request'
     #check if ID is given as parameter.
     Write-Verbose 'validating parameter'
+    Write-Verbose 'getting overview of all teams'
+    $Teams = Invoke-RestMethod -Uri 'https://api.teams.skype.com/emea/beta/teams/usergroups?teamType=null' -Method get -Headers $TeamsAuthToken
     if ($($team.length) -eq '36' -and $Team -match “[0123456789abcdef-]{$($Team.length)}”){
-    Write-Verbose "ip detected, skipping lookup"
-    $TeamId = $Team
+        Write-Verbose "ip detected, skipping lookup"
+        #$TeamId = $Team
+        $TeamId = $Teams|Where-Object {$_.groupId -eq "$Team"} #filtering does not yet work using $filter, so retrieving all teams and filters on the output
     } #check if ID is given as parameter.
     else {  #finding team based on wildcard search
-    $Teams = Invoke-RestMethod -Uri 'https://api.teams.skype.com/emea/beta/teams/usergroups?teamType=null' -Method get -Headers $TeamsAuthToken
-    Write-Verbose "$teams"
-    $TeamId = $Teams|Where-Object {$_.displayName -like "*$Team*"} #filtering does not yet work using $filter, so retrieving all teams and filters on the output
-    Write-Verbose "ID: $($TeamId.groupId)"
-    if ($($TeamId.groupId) -eq $null){write-error 'team not found'
-    throw ("team $Team couldn't be found")}
-    }
+        Write-Verbose "$teams"
+        $TeamId = $Teams|Where-Object {$_.displayName -like "*$Team*"} #filtering does not yet work using $filter, so retrieving all teams and filters on the output
+        Write-Verbose "ID: $($TeamId.groupId)"
+            if ($($TeamId.groupId) -eq $null){write-error 'team not found'
+            throw ("team $Team couldn't be found")}
+    }    
     Write-Verbose "finding team member"
     #finding team member
     $Members = foreach ($Member in $Members){
@@ -199,24 +200,13 @@ if ($AadModule -eq $null) {
     }}
     Write-Verbose "members: $Members"
     $teaminfo = (Invoke-RestMethod -Uri 'https://emea-client-ss.msg.skype.com/v1/users/ME/conversations?view=msnp24Equivalent&pageSize=300&startTime=1&targetType=Passport|Skype|Lync|Thread|NotificationStream' -Method Get -Headers $skypetoken).conversations|Where-Object {$_.threadProperties.isdeleted -ne 'true' -and $_.threadProperties.threadType -eq 'space'}  
-    $teamresults = foreach ($team in $teams){
-    try {
-    $teamres = ([uri]($teaminfo|Where-Object {$_.threadProperties.spaceThreadTopic -eq $team.displayName}).targetLink).Segments[3]
-    [pscustomobject]@{
-    groupId = $team.groupId
-    displayName = $team.displayName
-    targetLink = $teamres}
-    }catch {}
-    }
-    $teamurl = ($teamresults|Where-Object {$_.groupid -eq $($TeamId.groupId)}).targetlink
+    $teamurl = ([uri]($teaminfo|Where-Object {$_.threadProperties.spaceThreadTopic -eq $TeamId.displayName}).targetLink).Segments[3]
     Write-Verbose "$teamurl"
     $uri = "https://api.teams.skype.com/emea/beta/teams/$($teamurl)/bulkUpdateRoledMembers?allowBotsInChannel=true"
-
     $postparams = @{
     'users' = @($Members)
     'groupId' = $($TeamId.groupId)
     }
-    
     $result = Invoke-RestMethod -Uri $uri -Headers $TeamsAuthToken -Method Put -Body $($postparams|convertto-json)
     Write-Verbose "added team $displayName"
     Write-Verbose "$($result.value)"
@@ -224,4 +214,301 @@ if ($AadModule -eq $null) {
   }
 }
 
-Export-ModuleMember connect-TeamsService, new-Team, add-TeamMember
+ function get-Team {
+  <#
+  .SYNOPSIS
+  Invoking a rest request to the Microsoft graph api to get a teammember
+  .DESCRIPTION
+  This invoke the restapi to get teams.
+  .EXAMPLE
+  get-Team -identity Team
+  #>
+  [CmdletBinding()]
+  param
+  (
+        [Parameter(Mandatory=$false)]$identity
+  )
+  begin {
+  write-verbose "checking for teams token"
+    if (!($TeamsAuthToken))
+    {throw 'please run connect-TeamsService first'}
+  }
+  process {
+    write-verbose 'start to invoke rest request'
+    #check if ID is given as parameter.
+    $results = @()
+    Write-Verbose 'validating parameter'
+    Write-Verbose 'getting overview of all teams'
+    $Teams = Invoke-RestMethod -Uri 'https://api.teams.skype.com/emea/beta/teams/usergroups?teamType=null' -Method get -Headers $TeamsAuthToken
+    $teams
+    }
+}
+
+
+ function remove-TeamMember {
+  <#
+  .SYNOPSIS
+  Invoking a rest request to the Microsoft graph api to remove a teammember
+  .DESCRIPTION
+  This invoke the restapi to remove a teammember to a team.
+  .EXAMPLE
+  remove-teammember -team 'teamtest' -member 'user@contoso.com'
+  #>
+  [CmdletBinding()]
+  #[CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='High')]
+  param
+  (
+        [Parameter(Mandatory=$true)]$Team,
+        [Parameter(Mandatory=$true)]$Members
+  )
+  begin {
+  write-verbose "checking for teams token"
+    if (!($TeamsAuthToken))
+    {throw 'please run connect-TeamsService first'}
+  }
+  process {
+    write-verbose 'start to invoke rest request'
+    #check if ID is given as parameter.
+    $results = @()
+    Write-Verbose 'validating parameter'
+    Write-Verbose 'getting overview of all teams'
+    $Teams = Invoke-RestMethod -Uri 'https://api.teams.skype.com/emea/beta/teams/usergroups?teamType=null' -Method get -Headers $TeamsAuthToken
+    if ($($team.length) -eq '36' -and $Team -match “[0123456789abcdef-]{$($Team.length)}”){
+        Write-Verbose "ip detected, skipping lookup"
+        #$TeamId = $Team
+        $TeamId = $Teams|Where-Object {$_.groupId -eq "$Team"} #filtering does not yet work using $filter, so retrieving all teams and filters on the output
+    } #check if ID is given as parameter.
+    else {  #finding team based on wildcard search
+        Write-Verbose "$teams"
+        $TeamId = $Teams|Where-Object {$_.displayName -like "*$Team*"} #filtering does not yet work using $filter, so retrieving all teams and filters on the output
+        Write-Verbose "ID: $($TeamId.groupId)"
+            if ($($TeamId.groupId) -eq $null){write-error 'team not found'
+            throw ("team $Team couldn't be found")}
+    }
+    write-verbose "teamid: $TeamId"
+    $teaminfo = (Invoke-RestMethod -Uri 'https://emea-client-ss.msg.skype.com/v1/users/ME/conversations?view=msnp24Equivalent&pageSize=300&startTime=1&targetType=Passport|Skype|Lync|Thread|NotificationStream' -Method Get -Headers $skypetoken).conversations|Where-Object {$_.threadProperties.isdeleted -ne 'true' -and $_.threadProperties.threadType -eq 'space'}  
+    $teamurl = ([uri]($teaminfo|Where-Object {$_.threadProperties.spaceThreadTopic -eq $TeamId.displayName}).targetLink).Segments[3]
+    Write-Verbose "$teamurl"
+    Write-Verbose "finding team member"
+    #finding team member
+    foreach ($member in $members){
+        if ($($Member.length) -eq '36' -and $Member -match “[0123456789abcdef-]{$($Member.length)}”){
+        $MemberResult = $Member}
+        else {
+        $MemberResult = Invoke-RestMethod -Uri ' https://api.teams.skype.com/emea/beta/users/search?includeDLs=true&includeBots=false&enableGuest=false&skypeTeamsInfo=true' -Method Post -Headers $TeamsAuthToken -Body $Member #assuming correct UPN to be send.
+        if ($MemberResult.value.objectid -eq $null){write-error 'member not found'
+        throw ("UserPrincipalName $Member couldn't be found")}
+        }
+        Write-Verbose "member: $Member"
+        $uri = "https://api.teams.skype.com/emea/beta/teams/$($teamurl)/members"
+        $postparams = @{
+        teamMri = $($TeamURL)
+        updateType = 'Left'
+        userPrincipalName = $($MemberResult.value.userPrincipalName)
+        teamSmtpAddress = $($TeamId.smtpAddress)
+        'userMri' = "8:orgid:$($MemberResult.value.objectId)"
+        'groupId' = $($TeamId.groupId)
+        }
+        write-verbose "$postparams"
+        $results += Invoke-RestMethod -Uri $uri -Headers $TeamsAuthToken -Method Put -Body $($postparams|convertto-json)
+        Write-Verbose "removed teamMember $($MemberResult.value.userPrincipalName)"
+        Write-Verbose "$($results.value)"
+    }
+    $results.value
+    }
+}
+
+ function convert-TeamMemberToOwner {
+  <#
+  .SYNOPSIS
+  Invoking a rest request to the Microsoft graph api to remove a teammember
+  .DESCRIPTION
+  This invoke the restapi to remove a teammember to a team.
+  .EXAMPLE
+  remove-teammember -team 'teamtest' -member 'user@contoso.com'
+  #>
+  [CmdletBinding()]
+  #[CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='High')]
+  param
+  (
+        [Parameter(Mandatory=$true)]$Team,
+        [Parameter(Mandatory=$true)]$Members
+  )
+  begin {
+  write-verbose "checking for teams token"
+    if (!($TeamsAuthToken))
+    {throw 'please run connect-TeamsService first'}
+  }
+  process {
+    write-verbose 'start to invoke rest request'
+    #check if ID is given as parameter.
+    $results = @()
+    Write-Verbose 'validating parameter'
+    Write-Verbose 'getting overview of all teams'
+    $Teams = Invoke-RestMethod -Uri 'https://api.teams.skype.com/emea/beta/teams/usergroups?teamType=null' -Method get -Headers $TeamsAuthToken
+    if ($($team.length) -eq '36' -and $Team -match “[0123456789abcdef-]{$($Team.length)}”){
+        Write-Verbose "ip detected, skipping lookup"
+        #$TeamId = $Team
+        $TeamId = $Teams|Where-Object {$_.groupId -eq "$Team"} #filtering does not yet work using $filter, so retrieving all teams and filters on the output
+    } #check if ID is given as parameter.
+    else {  #finding team based on wildcard search
+        Write-Verbose "$teams"
+        $TeamId = $Teams|Where-Object {$_.displayName -like "*$Team*"} #filtering does not yet work using $filter, so retrieving all teams and filters on the output
+        Write-Verbose "ID: $($TeamId.groupId)"
+            if ($($TeamId.groupId) -eq $null){write-error 'team not found'
+            throw ("team $Team couldn't be found")}
+    }
+    $teaminfo = (Invoke-RestMethod -Uri 'https://emea-client-ss.msg.skype.com/v1/users/ME/conversations?view=msnp24Equivalent&pageSize=300&startTime=1&targetType=Passport|Skype|Lync|Thread|NotificationStream' -Method Get -Headers $skypetoken).conversations|Where-Object {$_.threadProperties.isdeleted -ne 'true' -and $_.threadProperties.threadType -eq 'space'}  
+    $teamurl = ([uri]($teaminfo|Where-Object {$_.threadProperties.spaceThreadTopic -eq $TeamId.displayName}).targetLink).Segments[3]
+    Write-Verbose "$teamurl"
+    Write-Verbose "finding team member"
+    #finding team member
+    foreach ($member in $members){
+        if ($($Member.length) -eq '36' -and $Member -match “[0123456789abcdef-]{$($Member.length)}”){
+        $MemberResult = $Member}
+        else {
+        $MemberResult = Invoke-RestMethod -Uri ' https://api.teams.skype.com/emea/beta/users/search?includeDLs=true&includeBots=false&enableGuest=false&skypeTeamsInfo=true' -Method Post -Headers $TeamsAuthToken -Body $Member #assuming correct UPN to be send.
+        if ($MemberResult.value.objectid -eq $null){write-error 'member not found'
+        throw ("UserPrincipalName $Member couldn't be found")}
+        }
+        Write-Verbose "member: $Member"
+        $uri = "https://api.teams.skype.com/emea/beta/teams/$($teamurl)/members"
+        $postparams = @{
+        teamMri = $($teamurl)
+        updateType = 'Promoted'
+        userPrincipalName = $($MemberResult.value.userPrincipalName)
+        teamSmtpAddress = $($TeamId.smtpAddress)
+        'userMri' = "8:orgid:$($MemberResult.value.objectId)"
+        'groupId' = $($TeamId.groupId)
+        }
+        $results += Invoke-RestMethod -Uri $uri -Headers $TeamsAuthToken -Method Put -Body $($postparams|convertto-json)
+        Write-Verbose "converted Member $($MemberResult.value.userPrincipalName) to Owner"
+        Write-Verbose "$($results.value)"
+    }
+    $results.value
+    }
+}
+
+ function convert-TeamOwnerToMember {
+  <#
+  .SYNOPSIS
+  Invoking a rest request to the Microsoft graph api to remove a teammember
+  .DESCRIPTION
+  This invoke the restapi to remove a teammember to a team.
+  .EXAMPLE
+  remove-teammember -team 'teamtest' -member 'user@contoso.com'
+  #>
+  [CmdletBinding()]
+  #[CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='High')]
+  param
+  (
+        [Parameter(Mandatory=$true)]$Team,
+        [Parameter(Mandatory=$true)]$Members
+  )
+  begin {
+  write-verbose "checking for teams token"
+    if (!($TeamsAuthToken))
+    {throw 'please run connect-TeamsService first'}
+  }
+  process {
+    write-verbose 'start to invoke rest request'
+    #check if ID is given as parameter.
+    $results = @()
+    Write-Verbose 'validating parameter'
+    Write-Verbose 'getting overview of all teams'
+    $Teams = Invoke-RestMethod -Uri 'https://api.teams.skype.com/emea/beta/teams/usergroups?teamType=null' -Method get -Headers $TeamsAuthToken
+    if ($($team.length) -eq '36' -and $Team -match “[0123456789abcdef-]{$($Team.length)}”){
+        Write-Verbose "ip detected, skipping lookup"
+        #$TeamId = $Team
+        $TeamId = $Teams|Where-Object {$_.groupId -eq "$Team"} #filtering does not yet work using $filter, so retrieving all teams and filters on the output
+    } #check if ID is given as parameter.
+    else {  #finding team based on wildcard search
+        Write-Verbose "$teams"
+        $TeamId = $Teams|Where-Object {$_.displayName -like "*$Team*"} #filtering does not yet work using $filter, so retrieving all teams and filters on the output
+        Write-Verbose "ID: $($TeamId.groupId)"
+            if ($($TeamId.groupId) -eq $null){write-error 'team not found'
+            throw ("team $Team couldn't be found")}
+    }
+    $teaminfo = (Invoke-RestMethod -Uri 'https://emea-client-ss.msg.skype.com/v1/users/ME/conversations?view=msnp24Equivalent&pageSize=300&startTime=1&targetType=Passport|Skype|Lync|Thread|NotificationStream' -Method Get -Headers $skypetoken).conversations|Where-Object {$_.threadProperties.isdeleted -ne 'true' -and $_.threadProperties.threadType -eq 'space'}  
+    $teamurl = ([uri]($teaminfo|Where-Object {$_.threadProperties.spaceThreadTopic -eq $TeamId.displayName}).targetLink).Segments[3]
+    Write-Verbose "$teamurl"
+    Write-Verbose "finding team member"
+    #finding team member
+    foreach ($member in $members){
+        if ($($Member.length) -eq '36' -and $Member -match “[0123456789abcdef-]{$($Member.length)}”){
+        $MemberResult = $Member}
+        else {
+        $MemberResult = Invoke-RestMethod -Uri ' https://api.teams.skype.com/emea/beta/users/search?includeDLs=true&includeBots=false&enableGuest=false&skypeTeamsInfo=true' -Method Post -Headers $TeamsAuthToken -Body $Member #assuming correct UPN to be send.
+        if ($MemberResult.value.objectid -eq $null){write-error 'member not found'
+        throw ("UserPrincipalName $Member couldn't be found")}
+        }
+        Write-Verbose "member: $Member"
+        $uri = "https://api.teams.skype.com/emea/beta/teams/$($teamurl)/members?allowBotsInChannel=true"
+        $postparams = @{
+        teamMri = $($teamurl)
+        updateType = 'Demoted'
+        userPrincipalName = $($MemberResult.value.userPrincipalName)
+        teamSmtpAddress = $($TeamId.smtpAddress)
+        'userMri' = "8:orgid:$($MemberResult.value.objectId)"
+        'groupId' = $($TeamId.groupId)
+        }
+        $results += Invoke-RestMethod -Uri $uri -Headers $TeamsAuthToken -Method Put -Body $($postparams|convertto-json)
+        Write-Verbose "convert Owner $($member.result.value.UserPrincipalName) to Member"
+        Write-Verbose "$($results.value)"
+    }
+    $results.value
+    }
+}
+
+function remove-Team {
+  <#
+  .SYNOPSIS
+  Invoking a rest request to the Microsoft graph api to add a teammember
+  .DESCRIPTION
+  This invoke the restapi to add a teammember to a team.
+  .EXAMPLE
+  add-teammember -team 'teamtest' -members 'user@contoso.com'
+  #>
+  #[CmdletBinding()]
+  [CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='High')]
+  param
+  (
+        [Parameter(Mandatory=$true)]$Team
+  )
+  begin {
+  write-verbose "checking for teams token"
+    if (!($TeamsAuthToken))
+    {throw 'please run connect-TeamsService first'}
+  }
+  process {
+    write-verbose 'start to invoke rest request'
+    #check if ID is given as parameter.
+    Write-Verbose 'validating parameter'
+    Write-Verbose 'getting overview of all teams'
+    $Teams = Invoke-RestMethod -Uri 'https://api.teams.skype.com/emea/beta/teams/usergroups?teamType=null' -Method get -Headers $TeamsAuthToken
+    if ($($team.length) -eq '36' -and $Team -match “[0123456789abcdef-]{$($Team.length)}”){
+        Write-Verbose "ip detected, skipping lookup"
+        #$TeamId = $Team
+        $TeamId = $Teams|Where-Object {$_.groupId -eq "$Team"} #filtering does not yet work using $filter, so retrieving all teams and filters on the output
+    } #check if ID is given as parameter.
+    else {  #finding team based on wildcard search
+        Write-Verbose "$teams"
+        $TeamId = $Teams|Where-Object {$_.displayName -like "*$Team*"} #filtering does not yet work using $filter, so retrieving all teams and filters on the output
+        Write-Verbose "ID: $($TeamId.groupId)"
+            if ($($TeamId.groupId) -eq $null){write-error 'team not found'
+            throw ("team $Team couldn't be found")}
+    }    
+    $teaminfo = (Invoke-RestMethod -Uri 'https://emea-client-ss.msg.skype.com/v1/users/ME/conversations?view=msnp24Equivalent&pageSize=300&startTime=1&targetType=Passport|Skype|Lync|Thread|NotificationStream' -Method Get -Headers $skypetoken).conversations|Where-Object {$_.threadProperties.isdeleted -ne 'true' -and $_.threadProperties.threadType -eq 'space'}  
+    $teamurl = ([uri]($teaminfo|Where-Object {$_.threadProperties.spaceThreadTopic -eq $TeamId.displayName}).targetLink).Segments[3]
+    Write-Verbose "$teamurl"
+    if ($pscmdlet.ShouldProcess($($teamid.displayname))) {
+    $uri = "https://api.teams.skype.com/emea/beta/teams/$($teamurl)/delete"
+    $result = Invoke-RestMethod -Uri $uri -Headers $TeamsAuthToken -Method Delete
+    }
+    Write-Verbose "remove team $($teamid.displayname) "
+    Write-Verbose "$($result.value)"
+    $result.value
+  }
+}
+
+Export-ModuleMember connect-TeamsService, new-Team, add-TeamMember, remove-TeamMember, convert-TeamMemberToOwner, convert-TeamOwnertoMember, get-Team, remove-Team
