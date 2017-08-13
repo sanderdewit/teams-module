@@ -99,51 +99,6 @@ function connect-TeamsService {
     break
   }
 }
- 
-function new-Team {
-  <#
-      .SYNOPSIS
-      Invoking a rest request to the Microsoft Teams graph api to add a team
-      .DESCRIPTION
-      Describe the function in more detail
-      .EXAMPLE
-      add-team -displayname 'Team Display' -description 'Team Description' -smtpaddress 'team@contoso.com' -alias 'team' -type 'public'
-  #>
-  [CmdletBinding()]
-  #[CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='Low')]
-  param
-  (
-    [Parameter(Mandatory=$true)]$description,
-    [Parameter(Mandatory=$true)]$displayname,
-    [Parameter(Mandatory=$true)]$smtpaddress,
-    [Parameter(Mandatory=$true)]$alias,
-    [Parameter(Mandatory=$true)]$Type
-  )
-  begin {
-    write-verbose 'checking for teams token'
-    if (!($TeamsAuthToken))
-    {throw 'please run connect-TeamsService first'}
-  }
-  process {
-    write-verbose 'start to invoke rest request'
-    $AcccessType = switch ($Type){
-      Private {1}
-      Public {3}
-    }
-    $uri = 'https://api.teams.skype.com/emea/beta/teams/create'
-    $postparams = @{
-      'alias' = $alias
-      'description' = $description
-      'displayName' = $displayname
-      'smtpAddress'=  $smtpaddress
-      'AccessType' = $AcccessType
-    }
-    $result = Invoke-RestMethod -Uri $uri -Headers $TeamsAuthToken -Method post -Body $($postparams|convertto-json)
-    Write-Verbose "added team $displayName"
-    Write-Verbose "$($result.value)"
-    "team created with id $($result.value.SiteInfo.groupid)"
-  }
-}
 
 function get-Team {
   <#
@@ -171,7 +126,9 @@ function get-Team {
     Write-Verbose 'validating parameter'
     Write-Verbose 'getting overview of all teams'
     $Teams = Invoke-RestMethod -Uri 'https://api.teams.skype.com/emea/beta/teams/usergroups?teamType=null' -Method get -Headers $TeamsAuthToken
-    $teams
+    $teaminfo = (Invoke-RestMethod -Uri 'https://emea-client-ss.msg.skype.com/v1/users/ME/conversations?view=msnp24Equivalent&pageSize=300&startTime=1&targetType=Passport|Skype|Lync|Thread|NotificationStream' -Method Get -Headers $skypetoken).conversations|Where-Object {$_.threadProperties.isdeleted -ne 'true' -and $_.threadProperties.threadType -eq 'space'}
+    $teamsfiltered = $Teams|Where-Object {$($teaminfo.threadProperties.spaceThreadTopic) -contains $_.displayname} #filter based on teams and skip groups
+    $teamsfiltered
   }
 }
 
