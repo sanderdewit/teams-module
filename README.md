@@ -1,3 +1,6 @@
+Please use the official Microsoft PowerShell module, this is no longer maintained!
+
+
 # teams-module
 PowerShell module for Microsoft Teams using the rest API that are not documented from api.teams.skype.com.
 
